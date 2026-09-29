@@ -3,14 +3,16 @@ package ai.rever.boss.components.workspaces
 import ai.rever.boss.components.window_panel.SplitViewState
 import ai.rever.boss.components.window_panel.SplitViewStateRegistry
 import ai.rever.boss.plugin.api.TabRegistry
+import ai.rever.boss.plugin.workspace.PanelConfig
+import ai.rever.boss.plugin.workspace.SplitConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 class WindowSpaceSaveIdentityTest {
     private fun layout(panelId: String) =
-        ai.rever.boss.plugin.workspace.SplitConfig.SinglePanel(
-            ai.rever.boss.plugin.workspace.PanelConfig(
+        SplitConfig.SinglePanel(
+            PanelConfig(
                 id = panelId,
                 tabs = emptyList(),
             ),
