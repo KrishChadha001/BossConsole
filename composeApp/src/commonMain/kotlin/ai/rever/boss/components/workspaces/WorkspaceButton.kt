@@ -368,19 +368,20 @@ fun WorkspaceButton(
             onSave = { name ->
                 // A named save creates a new Space. Ignore an overlapping submission instead
                 // of replaying it, because replaying the same name would create another Space.
-                if (namedSaveLatch.press()) {
+                if (namedSaveLatch.tryStart()) {
                     // Registration happens from a LaunchedEffect after first composition. Resolve
                     // the owner now so a live window is not mistaken for one that deregistered.
                     val saveOwner = NamedSaveOwner.capture(windowId)
                     getCurrentWorkspace?.invoke()?.let { currentLayout ->
                         workspaceManager.updateCurrentWorkspace(currentLayout)
-                        namedSaveLatch.begin()
                         workspaceManager.saveCurrentWorkspace(
                             name = name,
                             onSaved = { savedWorkspace ->
                                 try {
                                     when (saveOwner.rebind(savedWorkspace.id)) {
-                                        NamedSaveRebindOutcome.REBOUND -> {}
+                                        NamedSaveRebindOutcome.REBOUND -> {
+                                            StatusMessageManager.showMessage("Space Saved")
+                                        }
 
                                         NamedSaveRebindOutcome.NEVER_REGISTERED -> {
                                             workspaceButtonLogger.debug(
@@ -414,6 +415,11 @@ fun WorkspaceButton(
                             },
                         )
                     }
+                } else {
+                    workspaceButtonLogger.debug(
+                        LogCategory.WORKSPACE,
+                        "Named save ignored because another save is in flight",
+                    )
                 }
                 showSaveDialog = false
             },

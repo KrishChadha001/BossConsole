@@ -563,79 +563,18 @@ internal fun BossAppMenuActionEffects(
         // latch remembers it and re-runs the save once the in-flight one settles. At most one
         // such re-run happens per settle, and the re-run reads the LATEST layout, so nothing
         // typed in between the presses is lost.
-        val saveLatch = SaveInFlightLatch()
+        val saveLatch = remember(windowId) { SaveInFlightLatch() }
 
-        fun reportSaved(savedWorkspace: LayoutWorkspace) {
-            // The write finished long after the window acted; rebind only if this is
-            // still the state the window registered.
-            if (SplitViewStateRegistry.getState(windowId) === splitViewState) {
-                splitViewState.rebindCurrentWorkspace(savedWorkspace.id)
-                StatusMessageManager.showMessage("Space Saved")
-            } else {
-                menuActionLogger.debug(
-                    LogCategory.WORKSPACE,
-                    "Save finished after its window deregistered; the rebind is dropped",
-                    mapOf("workspaceId" to savedWorkspace.id),
-                )
-            }
-        }
-
-        fun runSave() {
-            val liveLayout =
-                extractCurrentWorkspace(
-                    splitViewState,
-                    windowProjectState.selectedProject.value.path,
-                )
-            val snapshot =
-                spaceSnapshotForSave(
-                    activeWorkspaceId = splitViewState.currentWorkspaceId,
-                    liveLayout = liveLayout,
-                    knownSpaces = workspaceManager.workspaces.value,
-                    processGlobalCurrent = workspaceManager.currentWorkspace.value,
-                )
-            workspaceManager.updateCurrentWorkspace(snapshot)
-            saveLatch.begin()
-            workspaceManager.saveCurrentWorkspace(
-                name = null,
-                onSaved = { savedWorkspace ->
-                    try {
-                        reportSaved(savedWorkspace)
-                    } finally {
-                        // Always release the latch; rerun only while this window still owns the state.
-                        saveLatch.settle {
-                            if (SplitViewStateRegistry.getState(windowId) === splitViewState) {
-                                runSave()
-                            } else {
-                                menuActionLogger.debug(
-                                    LogCategory.WORKSPACE,
-                                    "Queued save dropped after its window deregistered",
-                                )
-                            }
-                        }
-                    }
-                },
-                onFailed = { failedName ->
-                    try {
-                        StatusMessageManager.showMessage("Could not save \"$failedName\"")
-                    } finally {
-                        saveLatch.settle {
-                            if (SplitViewStateRegistry.getState(windowId) === splitViewState) {
-                                runSave()
-                            } else {
-                                menuActionLogger.debug(
-                                    LogCategory.WORKSPACE,
-                                    "Queued save dropped after its window deregistered",
-                                )
-                            }
-                        }
-                    }
-                },
-            )
-        }
         MenuActionsHandler.saveWorkspaceEvents
             .onEach { eventWindowId ->
-                if (eventWindowId == windowId && saveLatch.press()) {
-                    runSave()
+                if (eventWindowId == windowId) {
+                    performUnnamedSave(
+                        windowId = windowId,
+                        splitViewState = splitViewState,
+                        windowProjectState = windowProjectState,
+                        workspaceManager = workspaceManager,
+                        saveLatch = saveLatch,
+                    )
                 }
             }.launchIn(this)
     }
@@ -891,4 +830,78 @@ internal fun BossAppMenuActionEffects(
                 }
             }.launchIn(this)
     }
+}
+
+internal fun performUnnamedSave(
+    windowId: String,
+    splitViewState: SplitViewState,
+    windowProjectState: WindowProjectState,
+    workspaceManager: WorkspaceManager,
+    saveLatch: SaveInFlightLatch,
+) {
+    if (!saveLatch.tryStart()) return
+
+    fun reportSaved(savedWorkspace: LayoutWorkspace) {
+        if (SplitViewStateRegistry.getState(windowId) === splitViewState) {
+            splitViewState.rebindCurrentWorkspace(savedWorkspace.id)
+            StatusMessageManager.showMessage("Space Saved")
+        } else {
+            menuActionLogger.debug(
+                LogCategory.WORKSPACE,
+                "Save finished after its window deregistered; the rebind is dropped",
+                mapOf("workspaceId" to savedWorkspace.id),
+            )
+        }
+    }
+
+    fun runSave() {
+        val liveLayout =
+            extractCurrentWorkspace(
+                splitViewState,
+                windowProjectState.selectedProject.value.path,
+            )
+        val snapshot =
+            spaceSnapshotForSave(
+                activeWorkspaceId = splitViewState.currentWorkspaceId,
+                liveLayout = liveLayout,
+                knownSpaces = workspaceManager.workspaces.value,
+                processGlobalCurrent = workspaceManager.currentWorkspace.value,
+            )
+        workspaceManager.updateCurrentWorkspace(snapshot)
+        
+        fun settleLatch() {
+            saveLatch.settle {
+                if (SplitViewStateRegistry.getState(windowId) === splitViewState) {
+                    if (saveLatch.tryStart()) {
+                        runSave()
+                    }
+                } else {
+                    menuActionLogger.debug(
+                        LogCategory.WORKSPACE,
+                        "Queued save dropped after its window deregistered",
+                    )
+                }
+            }
+        }
+
+        workspaceManager.saveCurrentWorkspace(
+            name = null,
+            onSaved = { savedWorkspace ->
+                try {
+                    reportSaved(savedWorkspace)
+                } finally {
+                    settleLatch()
+                }
+            },
+            onFailed = { failedName ->
+                try {
+                    StatusMessageManager.showMessage("Could not save \"$failedName\"")
+                } finally {
+                    settleLatch()
+                }
+            },
+        )
+    }
+
+    runSave()
 }

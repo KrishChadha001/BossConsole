@@ -21,21 +21,20 @@ internal class SaveInFlightLatch {
     private var queued = false
 
     /**
-     * Returns `true` when this press may start immediately. While a save is in flight, remembers
-     * at most one queued press and returns `false`.
+     * Attempts to start a save. Returns `true` if the save may start immediately, moving the latch
+     * to the in-flight state. If a save is already in flight, remembers at most one queued press
+     * and returns `false`.
+     *
+     * This latch is main-thread-only by design.
      */
-    fun press(): Boolean {
+    fun tryStart(): Boolean {
         if (inFlight) {
             queued = true
             return false
         }
-        return true
-    }
-
-    /** Marks a save as started; further presses are remembered until [settle]. */
-    fun begin() {
         inFlight = true
         queued = false
+        return true
     }
 
     /**
